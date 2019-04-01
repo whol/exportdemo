@@ -33,7 +33,7 @@ public class ExportController {
 
         //模拟导出数据
         List<Status> statusList = new ArrayList<>();
-        for (int i=1; i<=96889; i++) {
+        for (int i=1; i<=16889; i++) {
             Status status = new Status();
             status.setId("" + i + "");
             status.setName("第" + i + "条");

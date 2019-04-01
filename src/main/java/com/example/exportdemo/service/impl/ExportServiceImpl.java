@@ -3,6 +3,7 @@ package com.example.exportdemo.service.impl;
 import com.example.exportdemo.entity.BaseEntity;
 import com.example.exportdemo.service.IExportService;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StopWatch;
 
@@ -11,7 +12,12 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.lang.reflect.Method;
+import java.text.MessageFormat;
 import java.util.*;
+import java.util.concurrent.Callable;
+import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -22,6 +28,12 @@ public class ExportServiceImpl implements IExportService {
     //每个csv数据量
     private static final Integer fileCapacity = 10000;
 
+    //模拟每次查询的数量
+    private static final Integer groupCapacity = 2000;
+
+    @Autowired
+    private ThreadPoolExecutor exportExecutor;
+
     @Override
     public ByteArrayOutputStream exportData(List dataList, String[] fieldNames, String[] fieldDescs) {
         StopWatch stopWatch = new StopWatch();
@@ -30,6 +42,75 @@ public class ExportServiceImpl implements IExportService {
         String fileNameStr = "统计导出";
 
         //生成csv字节数组流列表
+        List<byte[]> bytesList = new ArrayList<>();
+
+        //2、按照2000进行分组，得出组数；
+        Integer exportTotal = dataList.size();
+        Integer groupNum = (exportTotal + groupCapacity - 1) / groupCapacity;//计算页数
+        log.info("总数" + exportTotal + "， 每组" + groupCapacity + "， 组数" + groupNum);
+
+        //多线程请求调用获取导出列表
+        List<Future> futures = new ArrayList<>();
+        for (Integer i = 0; i < groupNum; i++) {
+            try {
+                // 多线程调用获取list
+                Future<List> future = exportExecutor.submit(new CallableTask(dataList, i));
+                futures.add(future);
+            } catch (RejectedExecutionException e) {
+                // 系统繁忙说明队列已满
+                log.error("第" + i + "次请求队列已满", e);
+            } catch (Exception e) {
+                log.error("远程调用获取导出列表异常" + e);
+            }
+        }
+
+        try {
+            //待生成文件的数据列表
+            List exportList = new ArrayList();
+            //考勤系统返回数据的组数，每满5组，进行一次csv文件组装
+            int exportCount = 0;
+            //生成文件编号
+            int exportIndex = 0;
+            while (true) {
+                //有未完成的future
+                if (futures != null && !futures.isEmpty()) {
+                    for (int i = 0; i < futures.size(); i++) {
+                        Future future = futures.get(i);
+                        // 判断future是否执行完成
+                        if (future.isDone()) {
+                            //从future中获取单次2000条数据，存入exportList中
+                            exportList.addAll((Collection) future.get());
+                            futures.remove(i);
+                            i--;
+                            exportCount++;
+                            //累计获取五次时，重置exportCount，生成对应csv文件，然后清空exportList
+                            if (exportCount >= 5) {
+                                exportCount = 0;
+                                exportIndex++;
+                                // 导出excel
+                                byte[] bytes = this.generateCsvFile(exportList, fieldNames, fieldDescs);
+                                bytesList.add(bytes);
+                                exportList.clear();
+                            }
+                        }
+                    }
+                } else {//future全部完成
+                    //如果exportCount不为零，说明还有不足1w条的数据未生成csv文件
+                    if (exportCount > 0) {
+                        exportIndex++;
+                        // 导出excel
+                        byte[] bytes = this.generateCsvFile(exportList, fieldNames, fieldDescs);
+                        bytesList.add(bytes);
+                        exportList.clear();
+                    }
+                    break;
+                }
+            }
+        } catch (Exception e) {
+            log.info("exception", e);
+        }
+
+        /*//生成csv字节数组流列表
         List<byte[]> bytesList = new ArrayList<>();
         Integer fileCount = dataList.size() / fileCapacity;
         for (int i=0; i<fileCount; i++) {
@@ -47,8 +128,8 @@ public class ExportServiceImpl implements IExportService {
             //生成byte数组
             byte[] bytes = this.generateCsvFile(subList, fieldNames, fieldDescs);
             bytesList.add(bytes);
-            subList.clear();
-        }
+            //subList.clear();
+        }*/
 
 
         stopWatch.stop();
@@ -91,6 +172,38 @@ public class ExportServiceImpl implements IExportService {
         return null;
     }
 
+
+    private class CallableTask implements Callable<List> {
+        private List dataList;
+        private Integer i;
+
+        public CallableTask(List dataList, Integer i) {
+            this.i = i;
+            this.dataList = dataList;
+
+        }
+
+        @Override
+        public List call() throws Exception {
+            StopWatch stopWatch = new StopWatch();
+            stopWatch.start("调用查询接口");
+            List subList = null;
+            //最后不足2000的数据
+            if (i * groupCapacity < dataList.size()) {
+                if ((i + 1) * groupCapacity > dataList.size()) {
+                    System.out.println("aaaa " + i);
+                    subList = dataList.subList(i * groupCapacity, dataList.size());
+                } else {
+                    System.out.println("bbbb " + i);
+                    subList = dataList.subList(i * groupCapacity, (i + 1) * groupCapacity);
+                }
+            }
+            stopWatch.stop();
+            log.info(stopWatch.prettyPrint());
+
+            return subList;
+        }
+    }
 
     /**
      * 传入数据列表、目标文件、字段名和字段标题，生成csv文件
