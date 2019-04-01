@@ -1,7 +1,6 @@
 package com.example.exportdemo.service.impl;
 
 import com.example.exportdemo.entity.BaseEntity;
-import com.example.exportdemo.entity.Status;
 import com.example.exportdemo.service.IExportService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -19,14 +18,39 @@ import java.util.zip.ZipOutputStream;
 @Slf4j
 @Service
 public class ExportServiceImpl implements IExportService {
+
+    //每个csv数据量
+    private static final Integer fileCapacity = 10000;
+
     @Override
-    public ByteArrayOutputStream exportData(List<Status> statusList, String[] fieldNames, String[] fieldDescs) {
+    public ByteArrayOutputStream exportData(List dataList, String[] fieldNames, String[] fieldDescs) {
         StopWatch stopWatch = new StopWatch();
         stopWatch.start("生成csv byte数组数据");
         //csv文件名前缀
         String fileNameStr = "统计导出";
-        //生成byte数组
-        byte[] bytes = this.generateCsvFile(statusList, fieldNames, fieldDescs);
+
+        //生成csv字节数组流列表
+        List<byte[]> bytesList = new ArrayList<>();
+        Integer fileCount = dataList.size() / fileCapacity;
+        for (int i=0; i<fileCount; i++) {
+            //分组，每个csv文件保存10000条数据，整体打包为一个zip文件
+            List subList = dataList.subList(i*fileCapacity, (i+1)*fileCapacity);
+            //生成byte数组
+            byte[] bytes = this.generateCsvFile(subList, fieldNames, fieldDescs);
+            bytesList.add(bytes);
+            //这里不能清除，否则原list中对应的数据也会清除掉
+            //subList.clear();
+        }
+        //最后不足10000的数据
+        if (fileCount*fileCapacity < dataList.size()) {
+            List subList = dataList.subList(fileCount*fileCapacity, dataList.size());
+            //生成byte数组
+            byte[] bytes = this.generateCsvFile(subList, fieldNames, fieldDescs);
+            bytesList.add(bytes);
+            subList.clear();
+        }
+
+
         stopWatch.stop();
 
         //打包zip文件；
@@ -35,11 +59,17 @@ public class ExportServiceImpl implements IExportService {
         ByteArrayOutputStream temp = new ByteArrayOutputStream();
         ZipOutputStream zos = new ZipOutputStream(temp);
         try {
-            String entryName = fileNameStr + ".csv";
-            ZipEntry entry = new ZipEntry(entryName);
-            zos.putNextEntry(entry);
-            zos.write(bytes);
-            zos.closeEntry();
+            for (int i = 0; i < bytesList.size(); i++) {
+                try {
+                    String entryName = fileNameStr + (i + 1) + ".csv";
+                    ZipEntry entry = new ZipEntry(entryName);
+                    zos.putNextEntry(entry);
+                    zos.write(bytesList.get(i));
+                    zos.closeEntry();
+                } catch (Exception e) {
+                    log.error("zip文件生成错误。", e);
+                }
+            }
             zos.close();
             stopWatch.stop();
             log.info(stopWatch.prettyPrint());
