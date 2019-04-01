@@ -21,6 +21,8 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
+import static java.lang.Thread.sleep;
+
 @Slf4j
 @Service
 public class ExportServiceImpl implements IExportService {
@@ -187,14 +189,14 @@ public class ExportServiceImpl implements IExportService {
         public List call() throws Exception {
             StopWatch stopWatch = new StopWatch();
             stopWatch.start("调用查询接口");
+            //睡眠一会
+            sleep(new Random().nextInt(2000));
             List subList = null;
             //最后不足2000的数据
             if (i * groupCapacity < dataList.size()) {
                 if ((i + 1) * groupCapacity > dataList.size()) {
-                    System.out.println("aaaa " + i);
                     subList = dataList.subList(i * groupCapacity, dataList.size());
                 } else {
-                    System.out.println("bbbb " + i);
                     subList = dataList.subList(i * groupCapacity, (i + 1) * groupCapacity);
                 }
             }
