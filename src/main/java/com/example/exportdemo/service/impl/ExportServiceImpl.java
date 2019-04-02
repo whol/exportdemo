@@ -12,7 +12,6 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.lang.reflect.Method;
-import java.text.MessageFormat;
 import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Future;
@@ -48,7 +47,7 @@ public class ExportServiceImpl implements IExportService {
 
         //2、按照2000进行分组，得出组数；
         Integer exportTotal = dataList.size();
-        Integer groupNum = (exportTotal + groupCapacity - 1) / groupCapacity;//计算页数
+        Integer groupNum = (exportTotal + groupCapacity - 1) / groupCapacity;//计算组数
         log.info("总数" + exportTotal + "， 每组" + groupCapacity + "， 组数" + groupNum);
 
         //多线程请求调用获取导出列表
@@ -62,14 +61,14 @@ public class ExportServiceImpl implements IExportService {
                 // 系统繁忙说明队列已满
                 log.error("第" + i + "次请求队列已满", e);
             } catch (Exception e) {
-                log.error("远程调用获取导出列表异常" + e);
+                log.error("获取导出列表异常" + e);
             }
         }
 
         try {
             //待生成文件的数据列表
             List exportList = new ArrayList();
-            //考勤系统返回数据的组数，每满5组，进行一次csv文件组装
+            //返回数据的组数，每满5组，进行一次csv文件组装
             int exportCount = 0;
             //生成文件编号
             int exportIndex = 0;
@@ -111,29 +110,6 @@ public class ExportServiceImpl implements IExportService {
         } catch (Exception e) {
             log.info("exception", e);
         }
-
-        /*//生成csv字节数组流列表
-        List<byte[]> bytesList = new ArrayList<>();
-        Integer fileCount = dataList.size() / fileCapacity;
-        for (int i=0; i<fileCount; i++) {
-            //分组，每个csv文件保存10000条数据，整体打包为一个zip文件
-            List subList = dataList.subList(i*fileCapacity, (i+1)*fileCapacity);
-            //生成byte数组
-            byte[] bytes = this.generateCsvFile(subList, fieldNames, fieldDescs);
-            bytesList.add(bytes);
-            //这里不能清除，否则原list中对应的数据也会清除掉
-            //subList.clear();
-        }
-        //最后不足10000的数据
-        if (fileCount*fileCapacity < dataList.size()) {
-            List subList = dataList.subList(fileCount*fileCapacity, dataList.size());
-            //生成byte数组
-            byte[] bytes = this.generateCsvFile(subList, fieldNames, fieldDescs);
-            bytesList.add(bytes);
-            //subList.clear();
-        }*/
-
-
         stopWatch.stop();
 
         //打包zip文件；
@@ -192,8 +168,9 @@ public class ExportServiceImpl implements IExportService {
             //睡眠一会
             sleep(new Random().nextInt(2000));
             List subList = null;
-            //最后不足2000的数据
+            //最后一组的i和组容量的乘积大于列表总大小，会造成下面else中的subList越界
             if (i * groupCapacity < dataList.size()) {
+                //最后不足2000的数据
                 if ((i + 1) * groupCapacity > dataList.size()) {
                     subList = dataList.subList(i * groupCapacity, dataList.size());
                 } else {
